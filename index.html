@@ -243,6 +243,14 @@ const formatFriendly = (dateStr) => {
   const dt = new Date(y, m-1, d);
   return `${m}/${d}(${WEEKDAY[dt.getDay()]})`;
 };
+const findPreviousLog = (workouts, exerciseId) => {
+  for (const w of workouts) {
+    const log = w.exercises.find(e => e.exerciseId === exerciseId);
+    if (log && log.sets && log.sets.length > 0) return { date: w.date, sets: log.sets };
+  }
+  return null;
+};
+const formatSetsSummary = (sets, unit) => sets.map(s => s.weight > 0 ? `${s.weight}kg×${s.value}${unit}` : `${s.value}${unit}`).join('・');
 const calcStreak = (workouts) => {
   const dateSet = new Set(workouts.map(w=>w.date));
   let streak = 0;
@@ -524,7 +532,7 @@ function PickerView({ level, onLevelChange, onStart, onBack, onBuildCustom }) {
 /* ---------- guided session ---------- */
 const REST_SET = 60, REST_EXERCISE = 60;
 
-function SessionView({ routine, level, customExercises, onCancel, onSave }) {
+function SessionView({ routine, level, customExercises, workouts, onCancel, onSave }) {
   const [exercises, setExercises] = useState(routine.exerciseIds.map(id=>resolveExercise(id, level, customExercises)));
   const [logs, setLogs] = useState(exercises.map(e => ({ exerciseId:e.id, name:e.name, bodyPart:e.bodyPart, icon:e.icon, unit:e.unit, sets:[] })));
   const [exIndex, setExIndex] = useState(0);
@@ -545,6 +553,20 @@ function SessionView({ routine, level, customExercises, onCancel, onSave }) {
   const startTime = useRef(Date.now());
 
   const current = exercises[exIndex];
+  const previous = useMemo(() => findPreviousLog(workouts, current.id), [current.id, workouts]);
+  const previousBest = useMemo(() => {
+    if (!previous) return null;
+    return previous.sets.reduce((best, s) => {
+      const effort = s.weight>0 ? s.weight*s.value : s.value;
+      const bestEffort = best ? (best.weight>0 ? best.weight*best.value : best.value) : -1;
+      return effort > bestEffort ? s : best;
+    }, null);
+  }, [previous]);
+  const achievedValue = current.unit === '秒' ? timerElapsed : value;
+  const currentEffort = useWeight ? weight*achievedValue : achievedValue;
+  const previousEffort = previousBest ? (previousBest.weight>0 ? previousBest.weight*previousBest.value : previousBest.value) : null;
+  const isBeatingPrevious = previousEffort!=null && achievedValue>0 && currentEffort > previousEffort;
+
   const availablePool = useMemo(() => {
     const built = EXERCISES.filter(e=>isUnlockedForLevel(e, level)).map(e=>resolveExercise(e.id, level, customExercises));
     return [...built, ...customExercises.map(e=>({ ...e }))];
@@ -751,9 +773,22 @@ function SessionView({ routine, level, customExercises, onCancel, onSave }) {
         <h2 className="text-xl font-display font-black text-slate-800 mt-3">{current.name}</h2>
         <p className="text-xs text-slate-500 mt-2 leading-relaxed">{current.tip}</p>
         <p className="text-xs font-bold text-forest-500 mt-3">{setIndex+1} / {current.sets} セットめ</p>
+        {previous ? (
+          <div className="inline-flex items-center gap-1.5 bg-sand-50 rounded-full px-3 py-1.5 mt-3">
+            <i className="fas fa-clock-rotate-left text-[10px] text-slate-400"></i>
+            <span className="text-[11px] font-bold text-slate-500">前回({formatFriendly(previous.date)}): {formatSetsSummary(previous.sets, current.unit)}</span>
+          </div>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 bg-sand-50 rounded-full px-3 py-1.5 mt-3">
+            <span className="text-[11px] font-bold text-slate-400">はじめての記録になります</span>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-3xl p-6 soft-shadow space-y-4">
+        {isBeatingPrevious && (
+          <p className="text-center text-xs font-bold text-forest-600"><i className="fas fa-arrow-trend-up mr-1"></i>前回を上回っています！</p>
+        )}
         {current.unit === '秒' ? (
           <div className="text-center space-y-4">
             <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
@@ -1179,7 +1214,7 @@ function App() {
   return (
     <div className={`max-w-md mx-auto min-h-screen px-4 pt-6 pb-28 transition-all ${focusMode ? 'grayscale contrast-125' : ''}`}>
       {view==='session' && activeRoutine ? (
-        <SessionView routine={activeRoutine} level={level} customExercises={customExercises} onCancel={cancelSession} onSave={saveSession} />
+        <SessionView routine={activeRoutine} level={level} customExercises={customExercises} workouts={workouts} onCancel={cancelSession} onSave={saveSession} />
       ) : view==='picker' ? (
         <PickerView level={level} onLevelChange={setLevel} onStart={startRoutine} onBack={()=>setView('home')} onBuildCustom={()=>setView('builder')} />
       ) : view==='builder' ? (
