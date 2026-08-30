@@ -182,7 +182,7 @@ const EXERCISES = [
     advanced:{ name:'ショルダープレスマシン(高重量)', tip:'重量を上げ、反動を使わず押し上げます。', sets:3, reps:8, unit:'回', difficulty:'しっかり', restSet:90, restExercise:90 },
   }},
   { id:'ab_machine', bodyPart:'core', icon:'fa-shield-halved', minLevel:'intermediate', variants:{
-    intermediate:{ name:'アブドミナルマシン', tip:'パッドを胸に当て、おなかを丸めるように上体を倒します。', sets:3, reps:12, unit:'回', difficulty:'ふつう', restSet:45, restExercise:45 },
+    intermediate:{ name:'アブドミナルマシン', tip:'パッドを胸に当て、おなかを丸めるように上体を倒します。', sets:3, reps:12, unit:'回', difficulty:'ふつう', restSet:60, restExercise:60 },
     advanced:{ name:'アブドミナルマシン(高重量)', tip:'重量を上げ、収縮をキープしながら戻します。', sets:3, reps:10, unit:'回', difficulty:'しっかり', restSet:60, restExercise:60 },
   }},
 ];
@@ -522,7 +522,7 @@ function PickerView({ level, onLevelChange, onStart, onBack, onBuildCustom }) {
 }
 
 /* ---------- guided session ---------- */
-const REST_SET = 15, REST_EXERCISE = 25;
+const REST_SET = 60, REST_EXERCISE = 60;
 
 function SessionView({ routine, level, customExercises, onCancel, onSave }) {
   const [exercises, setExercises] = useState(routine.exerciseIds.map(id=>resolveExercise(id, level, customExercises)));
