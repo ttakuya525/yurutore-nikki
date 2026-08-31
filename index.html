@@ -291,7 +291,7 @@ async function fetchEncouragement(summaryText) {
 /* ---------- storage ----------
    このファイルはダウンロードしてブラウザで直接開く用の版です。
    Claude専用のwindow.storageではなく、ブラウザ標準のlocalStorageに保存するので、
-   このファイルを保存した同じブラウザ・同じPCで開けば記録・レベル・集中モード・カスタム種目が引き継がれます。 */
+   このファイルを保存した同じブラウザ・同じPCで開けば記録・レベル・集中モード・カスタム種目・マイメニューが引き継がれます。 */
 const STORAGE_KEY = 'yurutore_workouts_v1';
 async function loadWorkouts() {
   try {
@@ -333,6 +333,18 @@ async function loadCustomExercises() {
 }
 async function persistCustomExercises(list) {
   try { localStorage.setItem(CUSTOM_EX_KEY, JSON.stringify(list)); }
+  catch (e) { console.error('save failed', e); }
+}
+
+const MY_ROUTINES_KEY = 'yurutore_my_routines_v1';
+async function loadMyRoutines() {
+  try {
+    const raw = localStorage.getItem(MY_ROUTINES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+async function persistMyRoutines(list) {
+  try { localStorage.setItem(MY_ROUTINES_KEY, JSON.stringify(list)); }
   catch (e) { console.error('save failed', e); }
 }
 
@@ -497,7 +509,7 @@ function HomeView({ workouts, level, onLevelChange, focusMode, onToggleFocus, on
   );
 }
 
-function PickerView({ level, onLevelChange, onStart, onBack, onBuildCustom }) {
+function PickerView({ level, onLevelChange, customExercises, myRoutines, onDeleteMyRoutine, onStart, onBack, onBuildCustom }) {
   return (
     <div className="space-y-4">
       <button onClick={onBack} className="text-xs font-bold text-slate-400"><i className="fas fa-arrow-left mr-1"></i>もどる</button>
@@ -519,6 +531,34 @@ function PickerView({ level, onLevelChange, onStart, onBack, onBuildCustom }) {
           </button>
         );
       })}
+
+      {myRoutines.length>0 && (
+        <React.Fragment>
+          <p className="text-xs font-bold text-slate-400 pt-1">マイメニュー({myRoutines.length}/3)</p>
+          {myRoutines.map(r => {
+            const totalSets = r.exerciseIds.reduce((a,id)=>{
+              const ex = resolveExercise(id, level, customExercises);
+              return a + (ex ? ex.sets : 0);
+            }, 0);
+            return (
+              <div key={r.id}
+                className="w-full text-left bg-white rounded-2xl p-4 soft-shadow flex items-center gap-4 border border-transparent">
+                <button onClick={()=>onStart(r)} className="flex items-center gap-4 flex-1 text-left">
+                  <div className="w-12 h-12 rounded-2xl bg-coral-50 text-coral-600 flex items-center justify-center text-lg flex-shrink-0">
+                    <i className={`fas ${r.icon}`}></i>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-black text-slate-800">{r.name}</h3>
+                    <p className="text-[11px] text-forest-500 font-bold mt-1"><i className="fas fa-clock mr-1"></i>{r.time} ・ {r.exerciseIds.length}種目・約{totalSets}セット</p>
+                  </div>
+                </button>
+                <button onClick={()=>onDeleteMyRoutine(r.id)} className="text-slate-300 hover:text-coral-500 p-2"><i className="fas fa-trash-alt text-sm"></i></button>
+              </div>
+            );
+          })}
+        </React.Fragment>
+      )}
+
       {level !== 'beginner' && (
         <button onClick={onBuildCustom}
           className="w-full text-center text-xs font-bold text-forest-600 py-3 border-2 border-dashed border-forest-200 rounded-2xl">
@@ -1098,8 +1138,30 @@ function CustomExerciseModal({ onClose, onSave }) {
 }
 
 /* ---------- free exercise builder (中級者・上級者むけ) ---------- */
-function BuilderView({ level, customExercises, onBack, onStart }) {
+function SaveRoutineModal({ onClose, onSave }) {
+  const [name, setName] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 soft-shadow">
+        <div className="flex justify-between items-center">
+          <h4 className="text-sm font-black text-slate-800">マイメニューとして保存</h4>
+          <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
+        </div>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1">メニュー名</p>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="例: 週末しっかりメニュー"
+            className="w-full bg-sand-50 border border-sand-100 rounded-xl p-2.5 text-sm focus:outline-none focus:border-forest-300" />
+        </div>
+        <button onClick={()=>{ if(name.trim()) onSave(name.trim()); }} disabled={!name.trim()}
+          className="w-full py-3 bg-coral-500 hover:bg-coral-600 disabled:opacity-40 text-white font-black text-sm rounded-2xl">保存する</button>
+      </div>
+    </div>
+  );
+}
+
+function BuilderView({ level, customExercises, myRoutines, onSaveMyRoutine, onBack, onStart }) {
   const [selected, setSelected] = useState([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const pool = useMemo(() => {
     const built = EXERCISES.filter(e=>isUnlockedForLevel(e, level)).map(e=>({ ...resolveExercise(e.id, level), custom:false }));
     const custom = customExercises.map(e=>({ ...e, custom:true }));
@@ -1108,13 +1170,17 @@ function BuilderView({ level, customExercises, onBack, onStart }) {
 
   const toggle = (id) => setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
 
+  const buildRoutine = (name) => ({ id:'custom_routine', name: name || 'カスタムメニュー', desc:'自分で選んだ種目のメニュー', time:`約${selected.length*3}分`, icon:'fa-star', exerciseIds:selected });
+
   const start = () => {
     if (selected.length===0) return;
-    onStart({ id:'custom_routine', name:'カスタムメニュー', desc:'自分で選んだ種目のメニュー', time:`約${selected.length*3}分`, icon:'fa-star', exerciseIds:selected });
+    onStart(buildRoutine());
   };
 
+  const atLimit = myRoutines.length >= 3;
+
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-32">
       <button onClick={onBack} className="text-xs font-bold text-slate-400"><i className="fas fa-arrow-left mr-1"></i>もどる</button>
       <h2 className="text-lg font-display font-black text-forest-700">じぶんで種目を選ぶ</h2>
       <p className="text-xs text-slate-400 font-bold -mt-2">やりたい種目をタップしてください({selected.length}種目選択中)</p>
@@ -1137,12 +1203,20 @@ function BuilderView({ level, customExercises, onBack, onStart }) {
           );
         })}
       </div>
-      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-sand-100 p-3 z-30">
+      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-sand-100 p-3 z-30 space-y-2">
         <button onClick={start} disabled={selected.length===0}
           className="max-w-md mx-auto w-full block py-3.5 bg-coral-500 disabled:opacity-40 text-white font-black text-sm rounded-2xl soft-shadow">
           この内容ではじめる({selected.length}種目)
         </button>
+        <button onClick={()=>setShowSaveModal(true)} disabled={selected.length===0 || atLimit}
+          className="max-w-md mx-auto w-full block py-2 text-center text-xs font-bold text-forest-600 disabled:text-slate-300">
+          <i className="fas fa-bookmark mr-1"></i>
+          {atLimit ? 'マイメニューは3つまで保存できます' : `マイメニューとして保存する(${myRoutines.length}/3)`}
+        </button>
       </div>
+      {showSaveModal && (
+        <SaveRoutineModal onClose={()=>setShowSaveModal(false)} onSave={(name)=>{ onSaveMyRoutine(buildRoutine(name)); setShowSaveModal(false); }} />
+      )}
     </div>
   );
 }
@@ -1154,6 +1228,7 @@ function App() {
   const [level, setLevel] = useState('beginner');
   const [focusMode, setFocusMode] = useState(false);
   const [customExercises, setCustomExercises] = useState([]);
+  const [myRoutines, setMyRoutines] = useState([]);
   const [tab, setTab] = useState('home');
   const [view, setView] = useState('home'); // home | picker | session | collection | builder
   const [activeRoutine, setActiveRoutine] = useState(null);
@@ -1161,11 +1236,12 @@ function App() {
   const [milestoneReveal, setMilestoneReveal] = useState(null);
 
   useEffect(() => { (async () => {
-    const [w, lvl, focus, custom] = await Promise.all([loadWorkouts(), loadLevel(), loadFocusMode(), loadCustomExercises()]);
+    const [w, lvl, focus, custom, myR] = await Promise.all([loadWorkouts(), loadLevel(), loadFocusMode(), loadCustomExercises(), loadMyRoutines()]);
     setWorkouts(w);
     if (lvl) setLevel(lvl);
     setFocusMode(focus);
     setCustomExercises(custom);
+    setMyRoutines(myR);
     setLoaded(true);
   })(); }, []);
 
@@ -1173,6 +1249,7 @@ function App() {
   useEffect(() => { if (loaded) persistLevel(level); }, [level, loaded]);
   useEffect(() => { if (loaded) persistFocusMode(focusMode); }, [focusMode, loaded]);
   useEffect(() => { if (loaded) persistCustomExercises(customExercises); }, [customExercises, loaded]);
+  useEffect(() => { if (loaded) persistMyRoutines(myRoutines); }, [myRoutines, loaded]);
 
   const startRoutine = (routine) => { setActiveRoutine(routine); setView('session'); };
   const cancelSession = () => {
@@ -1202,6 +1279,8 @@ function App() {
   };
   const addCustomExercise = (ex) => setCustomExercises(prev => [...prev, ex]);
   const deleteCustomExercise = (id) => setCustomExercises(prev => prev.filter(e=>e.id!==id));
+  const addMyRoutine = (routine) => setMyRoutines(prev => prev.length>=3 ? prev : [...prev, { ...routine, id:'my_'+Date.now() }]);
+  const deleteMyRoutine = (id) => setMyRoutines(prev => prev.filter(r=>r.id!==id));
 
   if (!loaded) {
     return (
@@ -1216,9 +1295,9 @@ function App() {
       {view==='session' && activeRoutine ? (
         <SessionView routine={activeRoutine} level={level} customExercises={customExercises} workouts={workouts} onCancel={cancelSession} onSave={saveSession} />
       ) : view==='picker' ? (
-        <PickerView level={level} onLevelChange={setLevel} onStart={startRoutine} onBack={()=>setView('home')} onBuildCustom={()=>setView('builder')} />
+        <PickerView level={level} onLevelChange={setLevel} customExercises={customExercises} myRoutines={myRoutines} onDeleteMyRoutine={deleteMyRoutine} onStart={startRoutine} onBack={()=>setView('home')} onBuildCustom={()=>setView('builder')} />
       ) : view==='builder' ? (
-        <BuilderView level={level} customExercises={customExercises} onBack={()=>setView('picker')} onStart={startRoutine} />
+        <BuilderView level={level} customExercises={customExercises} myRoutines={myRoutines} onSaveMyRoutine={addMyRoutine} onBack={()=>setView('picker')} onStart={startRoutine} />
       ) : view==='collection' ? (
         <CollectionView workouts={workouts} onBack={()=>setView('home')} />
       ) : (
