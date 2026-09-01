@@ -388,13 +388,30 @@ function DifficultyBadge({ level }) {
 }
 
 function Stepper({ value, onChange, step=1, min=0, unit }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+
+  const handleType = (e) => {
+    const raw = e.target.value;
+    setText(raw);
+    if (raw === '') return;
+    const v = parseFloat(raw);
+    if (!isNaN(v)) onChange(v);
+  };
+  const handleBlur = () => {
+    if (text === '' || isNaN(parseFloat(text))) {
+      setText(String(min));
+      onChange(min);
+    }
+  };
   return (
     <div className="flex items-center justify-center gap-4">
       <button onClick={()=>onChange(Math.max(min, value-step))}
         className="w-12 h-12 rounded-2xl bg-white border-2 border-forest-100 text-forest-600 text-xl font-bold soft-shadow active:scale-95 transition-transform">−</button>
-      <div className="w-24 text-center">
-        <span className="text-4xl font-display font-black text-forest-700">{value}</span>
-        <span className="text-sm font-bold text-forest-300 ml-1">{unit}</span>
+      <div className="w-24 text-center flex items-center justify-center gap-1">
+        <input type="number" inputMode="decimal" value={text} onChange={handleType} onBlur={handleBlur}
+          className="w-16 text-center text-4xl font-display font-black text-forest-700 bg-transparent focus:outline-none focus:bg-sand-50 rounded-lg" />
+        <span className="text-sm font-bold text-forest-300">{unit}</span>
       </div>
       <button onClick={()=>onChange(value+step)}
         className="w-12 h-12 rounded-2xl bg-coral-500 text-white text-xl font-bold soft-shadow active:scale-95 transition-transform">＋</button>
@@ -581,6 +598,8 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
   const [useWeight, setUseWeight] = useState(false);
   const [weight, setWeight] = useState(2);
   const [phase, setPhase] = useState('exercise'); // exercise | rest | bonus | complete
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  const [showBonusPicker, setShowBonusPicker] = useState(false);
   const [restLeft, setRestLeft] = useState(0);
   const [restTotal, setRestTotal] = useState(REST_SET);
   const [afterRest, setAfterRest] = useState('exercise');
@@ -679,11 +698,7 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
     }
   }, [phase]);
 
-  const addBonus = () => {
-    const sameBody = availablePool.filter(e => e.bodyPart===current.bodyPart && !exercises.find(x=>x.id===e.id));
-    const anyOther = availablePool.filter(e => !exercises.find(x=>x.id===e.id));
-    const pick = sameBody[0] || anyOther[0];
-    if (!pick) { finishNow(); return; }
+  const addSelectedExercise = (pick) => {
     setExercises(prev => [...prev, pick]);
     setLogs(prev => [...prev, { exerciseId:pick.id, name:pick.name, bodyPart:pick.bodyPart, icon:pick.icon, unit:pick.unit, sets:[] }]);
     setExIndex(exercises.length);
@@ -691,6 +706,23 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
     setValue(pick.reps);
     setUseWeight(false);
     setPhase('exercise');
+    setShowBonusPicker(false);
+  };
+
+  const handleWantBonus = () => {
+    const pool = availablePool.filter(e => !exercises.find(x=>x.id===e.id));
+    if (pool.length===0) { finishNow(); return; }
+    setShowBonusPicker(true);
+  };
+
+  const jumpToExercise = (i) => {
+    setExIndex(i);
+    const doneSets = logs[i].sets.length;
+    setSetIndex(Math.min(doneSets, exercises[i].sets - 1));
+    setValue(exercises[i].reps);
+    setUseWeight(false);
+    setPhase('exercise');
+    setShowSwitcher(false);
   };
 
   const finishNow = async () => {
@@ -747,9 +779,16 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
         <h2 className="text-lg font-display font-black text-forest-700">ここまで、よく頑張りました！</h2>
         <p className="text-sm text-slate-500">もう少しだけ、続けてみますか？</p>
         <div className="w-full space-y-3">
-          <button onClick={addBonus} className="w-full py-3.5 bg-forest-600 hover:bg-forest-700 text-white font-black text-sm rounded-2xl soft-shadow">もう1種目やってみる</button>
+          <button onClick={handleWantBonus} className="w-full py-3.5 bg-forest-600 hover:bg-forest-700 text-white font-black text-sm rounded-2xl soft-shadow">もう1種目やってみる</button>
           <button onClick={finishNow} className="w-full py-3.5 bg-white border border-slate-200 text-slate-600 font-bold text-sm rounded-2xl">ここまでにする</button>
         </div>
+        {showBonusPicker && (
+          <BonusPickerModal
+            pool={availablePool.filter(e => !exercises.find(x=>x.id===e.id))}
+            onClose={()=>setShowBonusPicker(false)}
+            onSelect={addSelectedExercise}
+          />
+        )}
       </div>
     );
   }
@@ -799,11 +838,17 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
         <p className="text-xs font-bold text-slate-400">{exIndex+1} / {exercises.length} 種目め</p>
       </div>
 
-      <div className="flex gap-1.5 justify-center">
-        {exercises.map((_,i)=>(
-          <div key={i} className={`h-1.5 rounded-full transition-all ${i<exIndex ? 'w-6 bg-forest-500' : i===exIndex ? 'w-10 bg-coral-500' : 'w-6 bg-sand-100'}`}></div>
-        ))}
+      <div className="flex items-center justify-center gap-2">
+        <div className="flex gap-1.5">
+          {exercises.map((_,i)=>(
+            <button key={i} onClick={()=>jumpToExercise(i)}
+              className={`h-1.5 rounded-full transition-all ${i<exIndex ? 'w-6 bg-forest-500' : i===exIndex ? 'w-10 bg-coral-500' : 'w-6 bg-sand-100'}`}></button>
+          ))}
+        </div>
       </div>
+      <button onClick={()=>setShowSwitcher(true)} className="block mx-auto text-[11px] font-bold text-forest-600 bg-forest-50 px-3 py-1.5 rounded-full">
+        <i className="fas fa-shuffle mr-1"></i>種目を変更する
+      </button>
 
       <div className="bg-white rounded-3xl p-6 soft-shadow text-center pop-in" key={current.id+exIndex}>
         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full inline-block" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>{bp.name}</span>
@@ -893,6 +938,10 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
         <button onClick={logSet} className="w-full py-4 bg-coral-500 hover:bg-coral-600 text-white font-black text-base rounded-2xl soft-shadow active:scale-95 transition-transform">
           できた！
         </button>
+      )}
+
+      {showSwitcher && (
+        <ExerciseSwitcherModal exercises={exercises} logs={logs} currentIndex={exIndex} onClose={()=>setShowSwitcher(false)} onSelect={jumpToExercise} />
       )}
     </div>
   );
@@ -1138,6 +1187,67 @@ function CustomExerciseModal({ onClose, onSave }) {
 }
 
 /* ---------- free exercise builder (中級者・上級者むけ) ---------- */
+function ExerciseSwitcherModal({ exercises, logs, currentIndex, onClose, onSelect }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 soft-shadow max-h-[80vh] overflow-y-auto">
+        <div className="flex justify-between items-center">
+          <h4 className="text-sm font-black text-slate-800">種目を変更する</h4>
+          <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
+        </div>
+        {exercises.map((ex, i) => {
+          const doneSets = logs[i] ? logs[i].sets.length : 0;
+          const isCurrent = i===currentIndex;
+          const isDone = doneSets >= ex.sets;
+          const bp = bodyPartOf(ex.bodyPart);
+          return (
+            <button key={i} onClick={()=>onSelect(i)}
+              className={`w-full text-left rounded-xl p-3 flex items-center gap-3 border-2 transition-colors ${isCurrent ? 'bg-forest-50 border-forest-400' : 'bg-white border-slate-100'}`}>
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
+                <i className={`fas ${ex.icon}`}></i>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-black text-slate-800">{ex.name}</p>
+                <p className="text-[10px] text-slate-400 font-bold">{doneSets} / {ex.sets} セット{isDone ? '・完了' : ''}</p>
+              </div>
+              {isCurrent && <i className="fas fa-arrow-right text-forest-600 text-xs"></i>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BonusPickerModal({ pool, onClose, onSelect }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-3 soft-shadow max-h-[80vh] overflow-y-auto">
+        <div className="flex justify-between items-center">
+          <h4 className="text-sm font-black text-slate-800">追加する種目を選ぶ</h4>
+          <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
+        </div>
+        {pool.length===0 && <p className="text-xs text-slate-400 font-bold text-center py-4">選べる種目がありません</p>}
+        {pool.map(ex => {
+          const bp = bodyPartOf(ex.bodyPart);
+          return (
+            <button key={ex.id} onClick={()=>onSelect(ex)}
+              className="w-full text-left rounded-xl p-3 flex items-center gap-3 border-2 border-slate-100 bg-white hover:border-forest-300 transition-colors">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
+                <i className={`fas ${ex.icon}`}></i>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-black text-slate-800">{ex.name}{ex.custom && <span className="ml-1 text-[9px] font-bold text-coral-500">カスタム</span>}</p>
+                <p className="text-[10px] text-slate-400 font-bold">{bp.name} ・ {ex.sets}セット × {ex.reps}{ex.unit}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SaveRoutineModal({ onClose, onSave }) {
   const [name, setName] = useState('');
   return (
