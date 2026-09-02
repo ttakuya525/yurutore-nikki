@@ -192,6 +192,9 @@ const isUnlockedForLevel = (fam, levelId) => {
   const order = ['beginner','intermediate','advanced'];
   return order.indexOf(levelId) >= order.indexOf(fam.minLevel);
 };
+const groupByBodyPart = (list) => BODY_PARTS
+  .map(bp => ({ bp, items: list.filter(v => v.bodyPart===bp.id) }))
+  .filter(g => g.items.length>0);
 const resolveExercise = (id, levelId, customList=[]) => {
   const custom = customList.find(c=>c.id===id);
   if (custom) return { ...custom };
@@ -1273,21 +1276,23 @@ function BonusPickerModal({ pool, onClose, onSelect }) {
           <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
         </div>
         {pool.length===0 && <p className="text-xs text-slate-400 font-bold text-center py-4">選べる種目がありません</p>}
-        {pool.map(ex => {
-          const bp = bodyPartOf(ex.bodyPart);
-          return (
-            <button key={ex.id} onClick={()=>onSelect(ex)}
-              className="w-full text-left rounded-xl p-3 flex items-center gap-3 border-2 border-slate-100 bg-white hover:border-forest-300 transition-colors">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
-                <i className={`fas ${ex.icon}`}></i>
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-black text-slate-800">{ex.name}{ex.custom && <span className="ml-1 text-[9px] font-bold text-coral-500">カスタム</span>}</p>
-                <p className="text-[10px] text-slate-400 font-bold">{bp.name} ・ {ex.sets}セット × {ex.reps}{ex.unit}</p>
-              </div>
-            </button>
-          );
-        })}
+        {groupByBodyPart(pool).map(({ bp, items }) => (
+          <div key={bp.id} className="space-y-2">
+            <p className="text-xs font-black px-1" style={{ color: bp.color }}>{bp.name}</p>
+            {items.map(ex => (
+              <button key={ex.id} onClick={()=>onSelect(ex)}
+                className="w-full text-left rounded-xl p-3 flex items-center gap-3 border-2 border-slate-100 bg-white hover:border-forest-300 transition-colors">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
+                  <i className={`fas ${ex.icon}`}></i>
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs font-black text-slate-800">{ex.name}{ex.custom && <span className="ml-1 text-[9px] font-bold text-coral-500">カスタム</span>}</p>
+                  <p className="text-[10px] text-slate-400 font-bold">{ex.sets}セット × {ex.reps}{ex.unit}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1339,24 +1344,28 @@ function BuilderView({ level, customExercises, myRoutines, onSaveMyRoutine, onBa
       <button onClick={onBack} className="text-xs font-bold text-slate-400"><i className="fas fa-arrow-left mr-1"></i>もどる</button>
       <h2 className="text-lg font-display font-black text-forest-700">じぶんで種目を選ぶ</h2>
       <p className="text-xs text-slate-400 font-bold -mt-2">やりたい種目をタップしてください({selected.length}種目選択中)</p>
-      <div className="space-y-2">
-        {pool.map(v => {
-          const bp = bodyPartOf(v.bodyPart);
-          const isSel = selected.includes(v.id);
-          return (
-            <button key={v.id} onClick={()=>toggle(v.id)}
-              className={`w-full text-left rounded-2xl p-3 flex items-center gap-3 border-2 transition-colors ${isSel ? 'bg-forest-50 border-forest-400' : 'bg-white border-transparent soft-shadow'}`}>
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
-                <i className={`fas ${v.icon}`}></i>
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-black text-slate-800">{v.name}{v.custom && <span className="ml-1 text-[9px] font-bold text-coral-500">カスタム</span>}</p>
-                <p className="text-[10px] text-slate-400 font-bold">{bp.name} ・ {v.sets}セット × {v.reps}{v.unit}</p>
-              </div>
-              {isSel && <i className="fas fa-check-circle text-forest-600"></i>}
-            </button>
-          );
-        })}
+      <div className="space-y-5">
+        {groupByBodyPart(pool).map(({ bp, items }) => (
+          <div key={bp.id} className="space-y-2">
+            <p className="text-xs font-black px-1" style={{ color: bp.color }}>{bp.name}</p>
+            {items.map(v => {
+              const isSel = selected.includes(v.id);
+              return (
+                <button key={v.id} onClick={()=>toggle(v.id)}
+                  className={`w-full text-left rounded-2xl p-3 flex items-center gap-3 border-2 transition-colors ${isSel ? 'bg-forest-50 border-forest-400' : 'bg-white border-transparent soft-shadow'}`}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor:`${bp.color}1A`, color:bp.color }}>
+                    <i className={`fas ${v.icon}`}></i>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-black text-slate-800">{v.name}{v.custom && <span className="ml-1 text-[9px] font-bold text-coral-500">カスタム</span>}</p>
+                    <p className="text-[10px] text-slate-400 font-bold">{v.sets}セット × {v.reps}{v.unit}</p>
+                  </div>
+                  {isSel && <i className="fas fa-check-circle text-forest-600"></i>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-sand-100 p-3 z-30 space-y-2">
         <button onClick={start} disabled={selected.length===0}
