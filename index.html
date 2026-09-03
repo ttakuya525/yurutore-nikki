@@ -370,9 +370,22 @@ function PlantIcon({ streak, size=64 }) {
   );
 }
 
+let sharedAudioCtx = null;
+const getAudioContext = () => {
+  if (!sharedAudioCtx) {
+    try { sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { return null; }
+  }
+  return sharedAudioCtx;
+};
+const unlockAudio = () => {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') { ctx.resume().catch(()=>{}); }
+};
 const playTone = (freq=880, duration=0.15, volume=0.15) => {
+  const ctx = getAudioContext();
+  if (!ctx) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
@@ -472,7 +485,7 @@ function BottomNav({ tab, setTab }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-sand-100 flex justify-around py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] z-30">
       {items.map(it => (
-        <button key={it.id} onClick={()=>setTab(it.id)}
+        <button key={it.id} onClick={()=>{ unlockAudio(); setTab(it.id); }}
           className={`flex flex-col items-center gap-1 px-6 py-1.5 rounded-xl transition-colors ${tab===it.id ? 'text-forest-600' : 'text-slate-400'}`}>
           <i className={`fas ${it.icon} text-lg`}></i>
           <span className="text-[11px] font-bold">{it.label}</span>
@@ -699,6 +712,7 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
   }, [timerElapsed]);
 
   const logSet = () => {
+    unlockAudio();
     if (navigator.vibrate) navigator.vibrate(30);
     setLogs(prev => {
       const copy = [...prev];
@@ -957,7 +971,7 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
             )}
             <div className="flex gap-2">
               {!timerRunning ? (
-                <button onClick={()=>setTimerRunning(true)} className="flex-1 py-3.5 bg-coral-500 hover:bg-coral-600 text-white font-black text-sm rounded-2xl">
+                <button onClick={()=>{ unlockAudio(); setTimerRunning(true); }} className="flex-1 py-3.5 bg-coral-500 hover:bg-coral-600 text-white font-black text-sm rounded-2xl">
                   <i className="fas fa-play mr-1"></i>{timerElapsed===0 ? 'スタート' : '再開'}
                 </button>
               ) : (
