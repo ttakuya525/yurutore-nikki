@@ -272,6 +272,14 @@ const last7Days = (workouts) => {
   }
   return days;
 };
+const groupWorkoutsByDate = (workouts) => {
+  const map = new Map();
+  workouts.forEach(w => {
+    if (!map.has(w.date)) map.set(w.date, []);
+    map.get(w.date).push(w);
+  });
+  return Array.from(map.entries()).map(([date, items]) => ({ date, items }));
+};
 
 async function fetchEncouragement(summaryText) {
   try {
@@ -1034,6 +1042,7 @@ function SessionView({ routine, level, customExercises, workouts, onCancel, onSa
 /* ---------- history ---------- */
 function HistoryView({ workouts, onDelete }) {
   const week = last7Days(workouts);
+  const groups = groupWorkoutsByDate(workouts);
   if (workouts.length===0) {
     return (
       <div className="bg-white rounded-2xl p-8 text-center soft-shadow">
@@ -1042,7 +1051,7 @@ function HistoryView({ workouts, onDelete }) {
     );
   }
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="bg-white rounded-2xl p-4 soft-shadow flex justify-between">
         {week.map(d => (
           <div key={d.date} className="flex flex-col items-center gap-1.5">
@@ -1053,24 +1062,33 @@ function HistoryView({ workouts, onDelete }) {
           </div>
         ))}
       </div>
-      {workouts.map(w => (
-        <div key={w.id} className="bg-white rounded-2xl p-4 soft-shadow space-y-2">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-forest-600 bg-forest-50 px-2 py-0.5 rounded-full">{formatFriendly(w.date)}</span>
-                {w.level && <span className="text-[11px] font-bold text-slate-400">{levelById(w.level).label}</span>}
-                {w.mood && <span className="text-base">{w.mood}</span>}
-              </div>
-              <h3 className="text-sm font-black text-slate-800 mt-1">{w.routineName}</h3>
-              <p className="text-xs text-slate-500 mt-0.5">{w.exercises.length}種目・がんばった回数 {w.totalSets}セット・{w.durationMin}分</p>
-            </div>
-            <button onClick={()=>onDelete(w.id)} className="text-slate-300 hover:text-coral-500 p-1"><i className="fas fa-trash-alt text-sm"></i></button>
+      {groups.map(({ date, items }) => (
+        <div key={date} className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <span className="text-xs font-black text-forest-600 bg-forest-50 px-2.5 py-1 rounded-full">{formatFriendly(date)}</span>
+            {items.length>1 && <span className="text-[11px] font-bold text-slate-400">{items.length}回のトレーニング</span>}
           </div>
-          {w.note && <p className="text-xs text-slate-600 bg-sand-50 rounded-lg p-2.5">💬 {w.note}</p>}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {w.exercises.map((e,i)=>(
-              <span key={i} className="text-[10px] font-bold px-2 py-1 rounded-full bg-sand-50 text-slate-600">{e.name}</span>
+          <div className="space-y-3 border-l-2 border-forest-100 pl-3">
+            {items.map(w => (
+              <div key={w.id} className="bg-white rounded-2xl p-4 soft-shadow space-y-2">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      {w.level && <span className="text-[11px] font-bold text-slate-400">{levelById(w.level).label}</span>}
+                      {w.mood && <span className="text-base">{w.mood}</span>}
+                    </div>
+                    <h3 className="text-sm font-black text-slate-800 mt-1">{w.routineName}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">{w.exercises.length}種目・がんばった回数 {w.totalSets}セット・{w.durationMin}分</p>
+                  </div>
+                  <button onClick={()=>onDelete(w.id)} className="text-slate-300 hover:text-coral-500 p-1"><i className="fas fa-trash-alt text-sm"></i></button>
+                </div>
+                {w.note && <p className="text-xs text-slate-600 bg-sand-50 rounded-lg p-2.5">💬 {w.note}</p>}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {w.exercises.map((e,i)=>(
+                    <span key={i} className="text-[10px] font-bold px-2 py-1 rounded-full bg-sand-50 text-slate-600">{e.name}</span>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
