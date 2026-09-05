@@ -571,11 +571,11 @@ function HomeView({ workouts, level, onLevelChange, focusMode, onToggleFocus, on
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-3xl p-5 soft-shadow flex items-center justify-between relative">
-        <div className="absolute top-3 right-3 flex items-center gap-1.5">
-          <button onClick={onOpenProfile} className="w-8 h-8 rounded-full bg-sand-50 text-slate-400 flex items-center justify-center text-xs">
+        <div className="absolute top-3 right-3 flex items-center gap-2">
+          <button onClick={onOpenProfile} className="w-11 h-11 rounded-full bg-sand-50 text-slate-500 flex items-center justify-center text-lg active:scale-95 transition-transform">
             <i className="fas fa-user-gear"></i>
           </button>
-          <button onClick={onToggleFocus} className="w-8 h-8 rounded-full bg-sand-50 text-slate-400 flex items-center justify-center text-xs">
+          <button onClick={onToggleFocus} className="w-11 h-11 rounded-full bg-sand-50 text-slate-500 flex items-center justify-center text-lg active:scale-95 transition-transform">
             <i className={`fas ${focusMode ? 'fa-sun' : 'fa-circle-half-stroke'}`}></i>
           </button>
         </div>
@@ -1331,9 +1331,9 @@ function ProfileModal({ profile, onClose, onSave }) {
         <p className="text-[11px] text-slate-400 font-bold leading-relaxed">消費カロリーの目安計算に使います。体重が特に重要で、他の項目は未設定でも計算できます。</p>
         <div>
           <p className="text-xs font-bold text-slate-500 mb-1">性別</p>
-          <div className="flex gap-1.5">
+          <div className="flex gap-2">
             {[{id:'male',label:'男性'},{id:'female',label:'女性'},{id:'unspecified',label:'回答しない'}].map(g => (
-              <button key={g.id} onClick={()=>setGender(g.id)} className={`px-3 py-1.5 rounded-full text-xs font-bold border ${gender===g.id ? 'bg-forest-600 text-white border-forest-600' : 'bg-white text-slate-500 border-slate-200'}`}>{g.label}</button>
+              <button key={g.id} onClick={()=>setGender(g.id)} className={`flex-1 py-3.5 rounded-2xl text-sm font-bold border-2 transition-colors ${gender===g.id ? 'bg-forest-600 text-white border-forest-600' : 'bg-white text-slate-500 border-slate-200'}`}>{g.label}</button>
             ))}
           </div>
         </div>
