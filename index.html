@@ -302,7 +302,7 @@ async function fetchEncouragement(summaryText) {
 /* ---------- storage ----------
    このファイルはダウンロードしてブラウザで直接開く用の版です。
    Claude専用のwindow.storageではなく、ブラウザ標準のlocalStorageに保存するので、
-   このファイルを保存した同じブラウザ・同じPCで開けば記録・レベル・集中モード・カスタム種目・マイメニュー・お気に入りが引き継がれます。 */
+   このファイルを保存した同じブラウザ・同じPCで開けば記録・レベル・集中モード・カスタム種目・マイメニュー・お気に入り・プロフィールが引き継がれます。 */
 const STORAGE_KEY = 'yurutore_workouts_v1';
 async function loadWorkouts() {
   try {
@@ -370,6 +370,49 @@ async function persistFavorites(list) {
   try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(list)); }
   catch (e) { console.error('save failed', e); }
 }
+
+const PROFILE_KEY = 'yurutore_profile_v1';
+async function loadProfile() {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+async function persistProfile(p) {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); }
+  catch (e) { console.error('save failed', e); }
+}
+
+/* ---------- calorie estimation (MET method) ----------
+   消費カロリー(kcal) = MET(運動強度) × 体重(kg) × 運動時間(時間)
+   MET値は種目の難易度(かんたん/ふつう/しっかり)を基準に、
+   等尺性運動(プランク)や有酸素運動、ジムでの負荷トレーニングなど
+   種類が大きく異なるものだけ個別に調整しています。 */
+const MET_OVERRIDES = {
+  plank: { 'かんたん':2.5, 'ふつう':2.8, 'しっかり':3.5 },
+  crunch: { 'かんたん':3.0, 'ふつう':3.8, 'しっかり':4.5 },
+  march: { 'かんたん':2.5, 'ふつう':3.5, 'しっかり':4.5 },
+  knee_burpee: { 'かんたん':5.0, 'ふつう':6.0, 'しっかり':8.0 },
+};
+const GYM_MACHINE_IDS = ['bb_bench','bb_squat','bb_deadlift','chest_press_machine','cable_crossover','lat_pulldown','seated_row','leg_press','leg_extension','leg_curl','shoulder_press_machine','ab_machine'];
+const metForLog = (log) => {
+  if (MET_OVERRIDES[log.exerciseId]) return MET_OVERRIDES[log.exerciseId][log.difficulty] || 4.0;
+  if (GYM_MACHINE_IDS.includes(log.exerciseId)) return log.difficulty==='しっかり' ? 6.0 : 5.0;
+  const map = { 'かんたん':3.0, 'ふつう':4.0, 'しっかり':6.0 };
+  return map[log.difficulty] || 4.0;
+};
+const caloriesForLog = (log, weightKg) => {
+  if (!weightKg) return 0;
+  const met = metForLog(log);
+  return log.sets.reduce((total, s) => {
+    const seconds = log.unit==='秒' ? s.value : s.value * 3; // 回数系は1回あたり約3秒と仮定
+    return total + met * weightKg * (seconds / 3600);
+  }, 0);
+};
+const caloriesForWorkout = (workout, weightKg) => {
+  if (!weightKg || !workout.exercises) return 0;
+  return workout.exercises.reduce((total, log) => total + caloriesForLog(log, weightKg), 0);
+};
 
 /* ---------- small pieces ---------- */
 function PlantIcon({ streak, size=64 }) {
@@ -516,7 +559,7 @@ function BottomNav({ tab, setTab }) {
 }
 
 /* ---------- home ---------- */
-function HomeView({ workouts, level, onLevelChange, focusMode, onToggleFocus, onOpenCollection, onStart, onPickRoutine }) {
+function HomeView({ workouts, level, onLevelChange, focusMode, onToggleFocus, onOpenCollection, onOpenProfile, onStart, onPickRoutine }) {
   const streak = calcStreak(workouts);
   const week = last7Days(workouts);
   const hour = new Date().getHours();
@@ -528,9 +571,14 @@ function HomeView({ workouts, level, onLevelChange, focusMode, onToggleFocus, on
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-3xl p-5 soft-shadow flex items-center justify-between relative">
-        <button onClick={onToggleFocus} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-sand-50 text-slate-400 flex items-center justify-center text-xs">
-          <i className={`fas ${focusMode ? 'fa-sun' : 'fa-circle-half-stroke'}`}></i>
-        </button>
+        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+          <button onClick={onOpenProfile} className="w-8 h-8 rounded-full bg-sand-50 text-slate-400 flex items-center justify-center text-xs">
+            <i className="fas fa-user-gear"></i>
+          </button>
+          <button onClick={onToggleFocus} className="w-8 h-8 rounded-full bg-sand-50 text-slate-400 flex items-center justify-center text-xs">
+            <i className={`fas ${focusMode ? 'fa-sun' : 'fa-circle-half-stroke'}`}></i>
+          </button>
+        </div>
         <div>
           <p className="text-sm text-slate-500 font-bold">{greeting}</p>
           <h1 className="text-xl font-display font-black text-forest-700 mt-0.5">ゆるトレ日記</h1>
@@ -645,9 +693,9 @@ function PickerView({ level, onLevelChange, customExercises, myRoutines, onDelet
 /* ---------- guided session ---------- */
 const REST_SET = 60, REST_EXERCISE = 60;
 
-function SessionView({ routine, level, customExercises, favorites, workouts, onCancel, onSave }) {
+function SessionView({ routine, level, customExercises, favorites, workouts, profile, onCancel, onSave }) {
   const [exercises, setExercises] = useState(routine.exerciseIds.map(id=>resolveExercise(id, level, customExercises)));
-  const [logs, setLogs] = useState(exercises.map(e => ({ exerciseId:e.id, name:e.name, bodyPart:e.bodyPart, icon:e.icon, unit:e.unit, sets:[] })));
+  const [logs, setLogs] = useState(exercises.map(e => ({ exerciseId:e.id, name:e.name, bodyPart:e.bodyPart, icon:e.icon, unit:e.unit, difficulty:e.difficulty, sets:[] })));
   const [exIndex, setExIndex] = useState(0);
   const [setIndex, setSetIndex] = useState(0);
   const [value, setValue] = useState(exercises[0].reps);
@@ -766,7 +814,7 @@ function SessionView({ routine, level, customExercises, favorites, workouts, onC
 
   const addSelectedExercise = (pick) => {
     setExercises(prev => [...prev, pick]);
-    setLogs(prev => [...prev, { exerciseId:pick.id, name:pick.name, bodyPart:pick.bodyPart, icon:pick.icon, unit:pick.unit, sets:[] }]);
+    setLogs(prev => [...prev, { exerciseId:pick.id, name:pick.name, bodyPart:pick.bodyPart, icon:pick.icon, unit:pick.unit, difficulty:pick.difficulty, sets:[] }]);
     setExIndex(exercises.length);
     setSetIndex(0);
     setValue(pick.reps);
@@ -838,6 +886,7 @@ function SessionView({ routine, level, customExercises, favorites, workouts, onC
       mood, note,
       exercises: logs,
       totalSets: totalCount,
+      bodyWeightKg: profile?.weight || null,
     });
   };
 
@@ -887,6 +936,7 @@ function SessionView({ routine, level, customExercises, favorites, workouts, onC
 
   if (phase==='complete') {
     const totalCount = logs.reduce((a,l)=>a+l.sets.length,0);
+    const kcal = profile?.weight ? Math.round(caloriesForWorkout({ exercises: logs }, profile.weight)) : null;
     return (
       <div className="min-h-[70vh] relative space-y-5 px-1">
         <ConfettiBurst />
@@ -894,6 +944,11 @@ function SessionView({ routine, level, customExercises, favorites, workouts, onC
           <div className="text-5xl">🎉</div>
           <h2 className="text-xl font-display font-black text-forest-700 mt-2">おつかれさまでした！</h2>
           <p className="text-sm text-slate-500 mt-1">今日は{logs.length}種目・合計{totalCount}セット、がんばりました</p>
+          {kcal!==null ? (
+            <p className="text-xs font-bold text-coral-600 mt-1"><i className="fas fa-fire mr-1"></i>推定消費カロリー: 約{kcal}kcal</p>
+          ) : (
+            <p className="text-[11px] font-bold text-slate-400 mt-1">プロフィール(体重)を設定すると消費カロリーの目安が出せます</p>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl p-4 soft-shadow min-h-[64px] flex items-center gap-3">
@@ -1054,9 +1109,10 @@ function SessionView({ routine, level, customExercises, favorites, workouts, onC
 }
 
 /* ---------- history ---------- */
-function HistoryView({ workouts, onDelete }) {
+function HistoryView({ workouts, onDelete, onUpdate }) {
   const week = last7Days(workouts);
   const groups = groupWorkoutsByDate(workouts);
+  const [detailWorkout, setDetailWorkout] = useState(null);
   if (workouts.length===0) {
     return (
       <div className="bg-white rounded-2xl p-8 text-center soft-shadow">
@@ -1083,7 +1139,9 @@ function HistoryView({ workouts, onDelete }) {
             {items.length>1 && <span className="text-[11px] font-bold text-slate-400">{items.length}回のトレーニング</span>}
           </div>
           <div className="space-y-3 border-l-2 border-forest-100 pl-3">
-            {items.map(w => (
+            {items.map(w => {
+              const kcal = w.bodyWeightKg ? Math.round(caloriesForWorkout(w, w.bodyWeightKg)) : null;
+              return (
               <div key={w.id} className="bg-white rounded-2xl p-4 soft-shadow space-y-2">
                 <div className="flex justify-between items-start">
                   <div>
@@ -1092,7 +1150,7 @@ function HistoryView({ workouts, onDelete }) {
                       {w.mood && <span className="text-base">{w.mood}</span>}
                     </div>
                     <h3 className="text-sm font-black text-slate-800 mt-1">{w.routineName}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">{w.exercises.length}種目・がんばった回数 {w.totalSets}セット・{w.durationMin}分</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{w.exercises.length}種目・がんばった回数 {w.totalSets}セット・{w.durationMin}分{kcal!==null && ` ・ 約${kcal}kcal`}</p>
                   </div>
                   <button onClick={()=>onDelete(w.id)} className="text-slate-300 hover:text-coral-500 p-1"><i className="fas fa-trash-alt text-sm"></i></button>
                 </div>
@@ -1102,11 +1160,22 @@ function HistoryView({ workouts, onDelete }) {
                     <span key={i} className="text-[10px] font-bold px-2 py-1 rounded-full bg-sand-50 text-slate-600">{e.name}</span>
                   ))}
                 </div>
+                <button onClick={()=>setDetailWorkout(w)} className="w-full pt-1 text-[11px] font-bold text-forest-600 text-center">
+                  詳細を見る・編集する
+                </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ))}
+      {detailWorkout && (
+        <WorkoutDetailModal
+          workout={detailWorkout}
+          onClose={()=>setDetailWorkout(null)}
+          onSave={(updated)=>{ onUpdate(updated); setDetailWorkout(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -1244,6 +1313,48 @@ function MilestoneRevealOverlay({ milestone, onClose }) {
 }
 
 /* ---------- custom exercises ---------- */
+function ProfileModal({ profile, onClose, onSave }) {
+  const [gender, setGender] = useState(profile?.gender || 'unspecified');
+  const [age, setAge] = useState(profile?.age || 30);
+  const [height, setHeight] = useState(profile?.height || 160);
+  const [weight, setWeight] = useState(profile?.weight || 60);
+
+  const submit = () => { onSave({ gender, age, height, weight }); onClose(); };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 soft-shadow max-h-[85vh] overflow-y-auto">
+        <div className="flex justify-between items-center">
+          <h4 className="text-sm font-black text-slate-800">プロフィール設定</h4>
+          <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
+        </div>
+        <p className="text-[11px] text-slate-400 font-bold leading-relaxed">消費カロリーの目安計算に使います。体重が特に重要で、他の項目は未設定でも計算できます。</p>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1">性別</p>
+          <div className="flex gap-1.5">
+            {[{id:'male',label:'男性'},{id:'female',label:'女性'},{id:'unspecified',label:'回答しない'}].map(g => (
+              <button key={g.id} onClick={()=>setGender(g.id)} className={`px-3 py-1.5 rounded-full text-xs font-bold border ${gender===g.id ? 'bg-forest-600 text-white border-forest-600' : 'bg-white text-slate-500 border-slate-200'}`}>{g.label}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1">年齢</p>
+          <Stepper value={age} onChange={setAge} step={1} min={10} unit="歳" />
+        </div>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1">身長</p>
+          <Stepper value={height} onChange={setHeight} step={1} min={100} unit="cm" />
+        </div>
+        <div>
+          <p className="text-xs font-bold text-slate-500 mb-1">体重</p>
+          <Stepper value={weight} onChange={setWeight} step={0.5} min={20} unit="kg" />
+        </div>
+        <button onClick={submit} className="w-full py-3 bg-coral-500 hover:bg-coral-600 text-white font-black text-sm rounded-2xl">保存する</button>
+      </div>
+    </div>
+  );
+}
+
 function CustomExerciseModal({ onClose, onSave }) {
   const [name, setName] = useState('');
   const [bodyPart, setBodyPart] = useState('chest');
@@ -1406,6 +1517,83 @@ function BonusPickerModal({ pool, favorites, onClose, onSelect }) {
   );
 }
 
+function WorkoutDetailModal({ workout, onClose, onSave }) {
+  const [exercises, setExercises] = useState(() => workout.exercises.map(e => ({ ...e, sets: e.sets.map(s => ({ ...s })) })));
+
+  const updateSetValue = (exIdx, setIdx, field, val) => {
+    setExercises(prev => {
+      const copy = prev.map(e => ({ ...e, sets: [...e.sets] }));
+      copy[exIdx].sets[setIdx] = { ...copy[exIdx].sets[setIdx], [field]: val };
+      return copy;
+    });
+  };
+  const addSet = (exIdx) => {
+    setExercises(prev => {
+      const copy = prev.map(e => ({ ...e, sets: [...e.sets] }));
+      const last = copy[exIdx].sets[copy[exIdx].sets.length-1] || { value:10, weight:0 };
+      copy[exIdx].sets.push({ ...last });
+      return copy;
+    });
+  };
+  const removeSet = (exIdx, setIdx) => {
+    setExercises(prev => {
+      const copy = prev.map(e => ({ ...e, sets: [...e.sets] }));
+      copy[exIdx].sets.splice(setIdx, 1);
+      return copy;
+    });
+  };
+
+  const totalSets = exercises.reduce((a,e)=>a+e.sets.length, 0);
+
+  const submit = () => {
+    onSave({ ...workout, exercises, totalSets });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 soft-shadow max-h-[85vh] overflow-y-auto">
+        <div className="flex justify-between items-center">
+          <div>
+            <h4 className="text-sm font-black text-slate-800">{workout.routineName}</h4>
+            <p className="text-[11px] text-slate-400 font-bold">{formatFriendly(workout.date)}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
+        </div>
+
+        <div className="space-y-4">
+          {exercises.map((ex, exIdx) => (
+            <div key={exIdx} className="bg-sand-50 rounded-2xl p-3 space-y-2">
+              <p className="text-xs font-black text-slate-800">{ex.name}</p>
+              {ex.sets.map((s, setIdx) => (
+                <div key={setIdx} className="flex items-center gap-2 bg-white rounded-lg p-2">
+                  <span className="text-[10px] font-bold text-slate-400 w-14 flex-shrink-0">{setIdx+1}セット目</span>
+                  <input type="number" inputMode="decimal" value={s.value}
+                    onChange={e=>updateSetValue(exIdx, setIdx, 'value', parseFloat(e.target.value) || 0)}
+                    className="w-14 text-center text-sm font-bold bg-sand-50 rounded-lg border border-slate-200 py-1" />
+                  <span className="text-[10px] text-slate-400 font-bold">{ex.unit}</span>
+                  <input type="number" inputMode="decimal" value={s.weight}
+                    onChange={e=>updateSetValue(exIdx, setIdx, 'weight', parseFloat(e.target.value) || 0)}
+                    className="w-14 text-center text-sm font-bold bg-sand-50 rounded-lg border border-slate-200 py-1" />
+                  <span className="text-[10px] text-slate-400 font-bold">kg</span>
+                  <button onClick={()=>removeSet(exIdx, setIdx)} className="text-slate-300 hover:text-coral-500 ml-auto p-1">
+                    <i className="fas fa-times text-xs"></i>
+                  </button>
+                </div>
+              ))}
+              <button onClick={()=>addSet(exIdx)} className="w-full py-1.5 text-[11px] font-bold text-forest-600 bg-white rounded-lg border border-dashed border-forest-200">
+                ＋セットを追加
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[11px] text-slate-400 font-bold text-center">合計 {totalSets}セット</p>
+        <button onClick={submit} className="w-full py-3 bg-coral-500 hover:bg-coral-600 text-white font-black text-sm rounded-2xl">この内容で保存する</button>
+      </div>
+    </div>
+  );
+}
+
 function SaveRoutineModal({ onClose, onSave }) {
   const [name, setName] = useState('');
   return (
@@ -1513,6 +1701,8 @@ function App() {
   const [customExercises, setCustomExercises] = useState([]);
   const [myRoutines, setMyRoutines] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  const [profile, setProfile] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [tab, setTab] = useState('home');
   const [view, setView] = useState('home'); // home | picker | session | collection | builder
   const [activeRoutine, setActiveRoutine] = useState(null);
@@ -1520,13 +1710,14 @@ function App() {
   const [milestoneReveal, setMilestoneReveal] = useState(null);
 
   useEffect(() => { (async () => {
-    const [w, lvl, focus, custom, myR, favs] = await Promise.all([loadWorkouts(), loadLevel(), loadFocusMode(), loadCustomExercises(), loadMyRoutines(), loadFavorites()]);
+    const [w, lvl, focus, custom, myR, favs, prof] = await Promise.all([loadWorkouts(), loadLevel(), loadFocusMode(), loadCustomExercises(), loadMyRoutines(), loadFavorites(), loadProfile()]);
     setWorkouts(w);
     if (lvl) setLevel(lvl);
     setFocusMode(focus);
     setCustomExercises(custom);
     setMyRoutines(myR);
     setFavorites(favs);
+    if (prof) setProfile(prof);
     setLoaded(true);
   })(); }, []);
 
@@ -1536,6 +1727,7 @@ function App() {
   useEffect(() => { if (loaded) persistCustomExercises(customExercises); }, [customExercises, loaded]);
   useEffect(() => { if (loaded) persistMyRoutines(myRoutines); }, [myRoutines, loaded]);
   useEffect(() => { if (loaded) persistFavorites(favorites); }, [favorites, loaded]);
+  useEffect(() => { if (loaded && profile) persistProfile(profile); }, [profile, loaded]);
 
   const startRoutine = (routine) => { setActiveRoutine(routine); setView('session'); };
   const cancelSession = () => {
@@ -1563,6 +1755,7 @@ function App() {
       onCancel: () => setConfirm(null),
     });
   };
+  const updateWorkout = (updated) => setWorkouts(prev => prev.map(w => w.id===updated.id ? updated : w));
   const addCustomExercise = (ex) => setCustomExercises(prev => [...prev, ex]);
   const deleteCustomExercise = (id) => setCustomExercises(prev => prev.filter(e=>e.id!==id));
   const addMyRoutine = (routine) => setMyRoutines(prev => prev.length>=3 ? prev : [...prev, { ...routine, id:'my_'+Date.now() }]);
@@ -1580,7 +1773,7 @@ function App() {
   return (
     <div className={`max-w-md mx-auto min-h-screen px-4 pt-6 pb-28 transition-all ${focusMode ? 'grayscale contrast-125' : ''}`}>
       {view==='session' && activeRoutine ? (
-        <SessionView routine={activeRoutine} level={level} customExercises={customExercises} favorites={favorites} workouts={workouts} onCancel={cancelSession} onSave={saveSession} />
+        <SessionView routine={activeRoutine} level={level} customExercises={customExercises} favorites={favorites} workouts={workouts} profile={profile} onCancel={cancelSession} onSave={saveSession} />
       ) : view==='picker' ? (
         <PickerView level={level} onLevelChange={setLevel} customExercises={customExercises} myRoutines={myRoutines} onDeleteMyRoutine={deleteMyRoutine} onStart={startRoutine} onBack={()=>setView('home')} onBuildCustom={()=>setView('builder')} />
       ) : view==='builder' ? (
@@ -1589,8 +1782,8 @@ function App() {
         <CollectionView workouts={workouts} onBack={()=>setView('home')} />
       ) : (
         <React.Fragment>
-          {tab==='home' && <HomeView workouts={workouts} level={level} onLevelChange={setLevel} focusMode={focusMode} onToggleFocus={()=>setFocusMode(f=>!f)} onOpenCollection={()=>setView('collection')} onStart={startRoutine} onPickRoutine={()=>setView('picker')} />}
-          {tab==='history' && <HistoryView workouts={workouts} onDelete={deleteWorkout} />}
+          {tab==='home' && <HomeView workouts={workouts} level={level} onLevelChange={setLevel} focusMode={focusMode} onToggleFocus={()=>setFocusMode(f=>!f)} onOpenCollection={()=>setView('collection')} onOpenProfile={()=>setShowProfileModal(true)} onStart={startRoutine} onPickRoutine={()=>setView('picker')} />}
+          {tab==='history' && <HistoryView workouts={workouts} onDelete={deleteWorkout} onUpdate={updateWorkout} />}
           {tab==='library' && <LibraryView level={level} onLevelChange={setLevel} customExercises={customExercises} favorites={favorites} onToggleFavorite={toggleFavorite} onAddCustom={addCustomExercise} onDeleteCustom={deleteCustomExercise} />}
           <BottomNav tab={tab} setTab={setTab} />
         </React.Fragment>
@@ -1611,6 +1804,10 @@ function App() {
 
       {milestoneReveal && (
         <MilestoneRevealOverlay milestone={milestoneReveal} onClose={()=>setMilestoneReveal(null)} />
+      )}
+
+      {showProfileModal && (
+        <ProfileModal profile={profile} onClose={()=>setShowProfileModal(false)} onSave={setProfile} />
       )}
     </div>
   );
