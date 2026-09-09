@@ -790,7 +790,7 @@ function SessionView({ routine, level, customExercises, favorites, workouts, pro
     const isLastSet = setIndex+1 >= current.sets;
     if (!isLastSet) {
       setSetIndex(setIndex+1);
-      setValue(current.reps);
+      if (current.unit !== '秒') setValue(current.reps); // 秒数系は前のセットの目標時間をそのまま引き継ぐ
       startRest(current.restSet || REST_SET, 'exercise');
     } else {
       const isLastExercise = exIndex+1 >= exercises.length;
@@ -1039,10 +1039,9 @@ function SessionView({ routine, level, customExercises, favorites, workouts, pro
               </div>
             </div>
             {!timerRunning && timerElapsed===0 && (
-              <div className="flex items-center justify-center gap-3">
-                <button onClick={()=>setValue(Math.max(5,value-5))} className="w-9 h-9 rounded-xl bg-white border-2 border-forest-100 text-forest-600 font-bold">−</button>
-                <span className="text-xs font-bold text-slate-400">目標を調整</span>
-                <button onClick={()=>setValue(value+5)} className="w-9 h-9 rounded-xl bg-coral-500 text-white font-bold">＋</button>
+              <div className="space-y-1">
+                <p className="text-[11px] font-bold text-slate-400 text-center">目標時間を調整(タップして直接入力もできます)</p>
+                <Stepper value={value} onChange={(v)=>setValue(Math.max(5, v))} step={5} min={5} unit="秒" />
               </div>
             )}
             <div className="flex gap-2">
