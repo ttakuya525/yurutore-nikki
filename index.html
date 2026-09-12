@@ -415,6 +415,144 @@ const caloriesForWorkout = (workout, weightKg) => {
   return workout.exercises.reduce((total, log) => total + caloriesForLog(log, weightKg), 0);
 };
 
+/* ---------- share image (canvas) ---------- */
+const drawRoundedRect = (ctx, x, y, w, h, r) => {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+};
+const wrapCanvasText = (ctx, text, x, y, maxWidth, lineHeight) => {
+  let line = '';
+  for (const ch of text) {
+    const testLine = line + ch;
+    if (ctx.measureText(testLine).width > maxWidth && line.length>0) {
+      ctx.fillText(line, x, y);
+      line = ch;
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, y);
+  return y + lineHeight;
+};
+const generateShareImage = (workout) => {
+  const FONT = '"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif';
+  const W = 900, H = 1200, pad = 50;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const bgGrad = ctx.createLinearGradient(0,0,0,H);
+  bgGrad.addColorStop(0, '#2F6F5E');
+  bgGrad.addColorStop(1, '#1C4438');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0,0,W,H);
+
+  drawRoundedRect(ctx, pad, pad, W-pad*2, H-pad*2, 40);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+
+  ctx.textAlign = 'center';
+  let y = pad + 80;
+
+  ctx.fillStyle = '#8FBBA9';
+  ctx.font = `bold 28px ${FONT}`;
+  ctx.fillText('🌱 ゆるトレ日記', W/2, y);
+  y += 55;
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = `bold 26px ${FONT}`;
+  ctx.fillText(formatFriendly(workout.date) + (workout.level ? ` ・ ${levelById(workout.level).label}` : ''), W/2, y);
+  y += 75;
+
+  ctx.fillStyle = '#263238';
+  ctx.font = `bold 50px ${FONT}`;
+  ctx.fillText(workout.routineName, W/2, y);
+  y += 40;
+
+  if (workout.mood) {
+    y += 70;
+    ctx.font = `64px ${FONT}`;
+    ctx.fillText(workout.mood, W/2, y);
+    y += 30;
+  } else {
+    y += 40;
+  }
+
+  const kcal = workout.bodyWeightKg ? Math.round(caloriesForWorkout(workout, workout.bodyWeightKg)) : null;
+  const stats = [
+    { label:'種目', value:`${workout.exercises.length}` },
+    { label:'セット', value:`${workout.totalSets}` },
+    { label:'時間', value:`${workout.durationMin}分` },
+  ];
+  if (kcal!==null) stats.push({ label:'kcal', value:`${kcal}` });
+
+  y += 40;
+  const statW = (W - pad*2 - 60) / stats.length;
+  stats.forEach((s,i) => {
+    const cx = pad + 30 + statW*i + statW/2;
+    ctx.fillStyle = '#FF8B6B';
+    ctx.font = `bold 46px ${FONT}`;
+    ctx.fillText(s.value, cx, y);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `bold 22px ${FONT}`;
+    ctx.fillText(s.label, cx, y+38);
+  });
+  y += 110;
+
+  ctx.strokeStyle = '#EAF3EF';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(pad+40, y);
+  ctx.lineTo(W-pad-40, y);
+  ctx.stroke();
+  y += 55;
+
+  ctx.textAlign = 'left';
+  ctx.font = `bold 30px ${FONT}`;
+  workout.exercises.forEach(ex => {
+    ctx.fillStyle = '#2F6F5E';
+    ctx.fillText('・ ' + ex.name, pad+50, y);
+    y += 48;
+  });
+
+  if (workout.note) {
+    y += 25;
+    ctx.fillStyle = '#64748b';
+    ctx.font = `24px ${FONT}`;
+    wrapCanvasText(ctx, `💬 ${workout.note}`, pad+50, y, W-pad*2-100, 34);
+  }
+
+  return canvas;
+};
+const shareOrDownloadImage = (workout) => {
+  const canvas = generateShareImage(workout);
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    const filename = `yurutore-${workout.date}.png`;
+    try {
+      const file = new File([blob], filename, { type:'image/png' });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files:[file] })) {
+        await navigator.share({ files:[file], title:'ゆるトレ日記', text:`${workout.routineName}を記録しました！` });
+        return;
+      }
+    } catch (e) { /* キャンセル等、下のダウンロードにフォールバック */ }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+};
+
 /* ---------- small pieces ---------- */
 function PlantIcon({ streak, size=64 }) {
   const stage = streak>=7 ? 3 : streak>=3 ? 2 : streak>=1 ? 1 : 0;
@@ -1163,9 +1301,14 @@ function HistoryView({ workouts, onDelete, onUpdate }) {
                     <span key={i} className="text-[10px] font-bold px-2 py-1 rounded-full bg-sand-50 text-slate-600">{e.name}</span>
                   ))}
                 </div>
-                <button onClick={()=>setDetailWorkout(w)} className="w-full pt-1 text-[11px] font-bold text-forest-600 text-center">
-                  詳細を見る・編集する
-                </button>
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={()=>setDetailWorkout(w)} className="flex-1 text-[11px] font-bold text-forest-600 text-center py-1.5 bg-sand-50 rounded-lg">
+                    詳細を見る・編集する
+                  </button>
+                  <button onClick={()=>shareOrDownloadImage(w)} className="flex-1 text-[11px] font-bold text-coral-600 text-center py-1.5 bg-coral-50 rounded-lg">
+                    <i className="fas fa-image mr-1"></i>画像で保存・共有
+                  </button>
+                </div>
               </div>
               );
             })}
