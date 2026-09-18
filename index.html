@@ -846,6 +846,7 @@ function SessionView({ routine, level, customExercises, favorites, workouts, pro
   const [phase, setPhase] = useState('exercise'); // exercise | rest | bonus | complete
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showBonusPicker, setShowBonusPicker] = useState(false);
+  const [pendingNextIndex, setPendingNextIndex] = useState(null);
   const [restLeft, setRestLeft] = useState(0);
   const [restTotal, setRestTotal] = useState(REST_SET);
   const [afterRest, setAfterRest] = useState('exercise');
@@ -921,6 +922,16 @@ function SessionView({ routine, level, customExercises, favorites, workouts, pro
     }
   }, [timerElapsed]);
 
+  const findNextIncompleteIndex = () => {
+    const n = exercises.length;
+    for (let step=1; step<=n; step++){
+      const idx = (exIndex+step) % n;
+      if (idx === exIndex) continue;
+      if (logs[idx].sets.length < exercises[idx].sets) return idx;
+    }
+    return -1;
+  };
+
   const logSet = () => {
     unlockAudio();
     if (navigator.vibrate) navigator.vibrate(30);
@@ -935,22 +946,26 @@ function SessionView({ routine, level, customExercises, favorites, workouts, pro
       if (current.unit !== '秒') setValue(current.reps); // 秒数系は前のセットの目標時間をそのまま引き継ぐ
       startRest(current.restSet || REST_SET, 'exercise');
     } else {
-      const isLastExercise = exIndex+1 >= exercises.length;
-      if (isLastExercise) {
+      const nextIdx = findNextIncompleteIndex();
+      if (nextIdx === -1) {
         setPhase('bonus');
       } else {
+        setPendingNextIndex(nextIdx);
         startRest(current.restExercise || REST_EXERCISE, 'nextExercise');
       }
     }
   };
 
   useEffect(()=>{
-    if (phase==='nextExercise') {
-      setExIndex(i=>i+1);
-      setSetIndex(0);
-      setValue(exercises[exIndex+1] ? exercises[exIndex+1].reps : 10);
+    if (phase==='nextExercise' && pendingNextIndex!=null) {
+      const idx = pendingNextIndex;
+      setExIndex(idx);
+      const doneSets = logs[idx] ? logs[idx].sets.length : 0;
+      setSetIndex(Math.min(doneSets, exercises[idx].sets - 1));
+      setValue(exercises[idx].reps);
       setUseWeight(false);
       setPhase('exercise');
+      setPendingNextIndex(null);
     }
   }, [phase]);
 
@@ -1746,6 +1761,9 @@ function WorkoutDetailModal({ workout, onClose, onSave }) {
       return copy;
     });
   };
+  const removeExercise = (exIdx) => {
+    setExercises(prev => prev.filter((_,i)=>i!==exIdx));
+  };
 
   const totalSets = exercises.reduce((a,e)=>a+e.sets.length, 0);
 
@@ -1765,9 +1783,17 @@ function WorkoutDetailModal({ workout, onClose, onSave }) {
         </div>
 
         <div className="space-y-4">
+          {exercises.length===0 && (
+            <p className="text-xs text-slate-400 font-bold text-center py-4">種目がすべて削除されました。保存すると空の記録になります。</p>
+          )}
           {exercises.map((ex, exIdx) => (
             <div key={exIdx} className="bg-sand-50 rounded-2xl p-3 space-y-2">
-              <p className="text-xs font-black text-slate-800">{ex.name}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-black text-slate-800">{ex.name}</p>
+                <button onClick={()=>removeExercise(exIdx)} className="text-slate-300 hover:text-coral-500 p-1">
+                  <i className="fas fa-trash-alt text-xs"></i>
+                </button>
+              </div>
               {ex.sets.map((s, setIdx) => (
                 <div key={setIdx} className="flex items-center gap-2 bg-white rounded-lg p-2">
                   <span className="text-[10px] font-bold text-slate-400 w-14 flex-shrink-0">{setIdx+1}セット目</span>
@@ -1792,7 +1818,8 @@ function WorkoutDetailModal({ workout, onClose, onSave }) {
         </div>
 
         <p className="text-[11px] text-slate-400 font-bold text-center">合計 {totalSets}セット</p>
-        <button onClick={submit} className="w-full py-3 bg-coral-500 hover:bg-coral-600 text-white font-black text-sm rounded-2xl">この内容で保存する</button>
+        <button onClick={submit} disabled={exercises.length===0}
+          className="w-full py-3 bg-coral-500 hover:bg-coral-600 disabled:opacity-40 text-white font-black text-sm rounded-2xl">この内容で保存する</button>
       </div>
     </div>
   );
