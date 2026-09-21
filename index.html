@@ -457,7 +457,12 @@ const wrapCanvasText = (ctx, text, x, y, maxWidth, lineHeight) => {
 };
 const generateShareImage = (workout) => {
   const FONT = '"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif';
-  const W = 900, H = 1200, pad = 50;
+  const W = 900, pad = 50;
+  const HEADER_H = 620;
+  const PER_EXERCISE_H = 130;
+  const NOTE_H = workout.note ? 130 : 0;
+  const H = Math.max(1000, HEADER_H + workout.exercises.length*PER_EXERCISE_H + NOTE_H + pad*2);
+
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
@@ -529,15 +534,20 @@ const generateShareImage = (workout) => {
   y += 55;
 
   ctx.textAlign = 'left';
-  ctx.font = `bold 30px ${FONT}`;
   workout.exercises.forEach(ex => {
+    ctx.font = `bold 30px ${FONT}`;
     ctx.fillStyle = '#2F6F5E';
     ctx.fillText('・ ' + ex.name, pad+50, y);
-    y += 48;
+    y += 38;
+    const summary = ex.sets && ex.sets.length ? formatSetsSummary(ex.sets, ex.unit) : '記録なし';
+    ctx.font = `22px ${FONT}`;
+    ctx.fillStyle = '#94a3b8';
+    y = wrapCanvasText(ctx, summary, pad+68, y, W-pad*2-118, 30);
+    y += 14;
   });
 
   if (workout.note) {
-    y += 25;
+    y += 15;
     ctx.fillStyle = '#64748b';
     ctx.font = `24px ${FONT}`;
     wrapCanvasText(ctx, `💬 ${workout.note}`, pad+50, y, W-pad*2-100, 34);
