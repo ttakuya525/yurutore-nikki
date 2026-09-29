@@ -318,7 +318,7 @@ async function fetchEncouragement(summaryText) {
    このファイルはダウンロードしてブラウザで直接開く用の版です。
    Claude専用のwindow.storageではなく、ブラウザ標準のlocalStorageに保存するので、
    このファイルを保存した同じブラウザ・同じPCで開けば記録・レベル・集中モード・カスタム種目・マイメニュー・お気に入り・プロフィールが引き継がれます。
-   端末を変える場合は、ホーム画面のバックアップ機能でエクスポート/インポートしてください。 */
+   端末を変える・複数の端末の記録をまとめる場合は、ホーム画面のバックアップ機能で書き出し/読み込み（統合）してください。 */
 const STORAGE_KEY = 'yurutore_workouts_v1';
 async function loadWorkouts() {
   try {
@@ -1499,12 +1499,61 @@ function MilestoneRevealOverlay({ milestone, onClose }) {
 }
 
 /* ---------- custom exercises ---------- */
+/* ---------- backup merge ----------
+   別の端末のバックアップを、この端末の記録に「足し合わせる」ための処理。
+   ・記録: IDが同じ、または日付・メニュー名・時間・セット数などが完全に一致するものは重複としてスキップ
+   ・自分の種目 / マイメニュー: IDが同じものはスキップ（マイメニューは上限3つ）
+   ・お気に入り: 両方をまとめる
+   ・レベル / 集中モード / プロフィール: この端末の設定を優先（プロフィール未設定のときだけ取り込む） */
+const workoutSignature = (w) => [w.date, w.routineName, w.durationMin, w.totalSets, w.mood, w.note || ''].join('|');
+function mergeBackup(current, incoming) {
+  const stats = { workoutsAdded:0, workoutsSkipped:0, customAdded:0, routinesAdded:0, routinesSkipped:0, favoritesAdded:0 };
+  const arr = (v) => Array.isArray(v) ? v : [];
+
+  const curW = arr(current.workouts);
+  const ids = new Set(curW.map(w => w.id));
+  const curSigs = new Set(curW.map(workoutSignature));
+  const addedW = [];
+  arr(incoming.workouts).forEach(w => {
+    if (!w || typeof w !== 'object') return;
+    if (ids.has(w.id) || curSigs.has(workoutSignature(w))) { stats.workoutsSkipped++; return; }
+    ids.add(w.id); addedW.push(w); stats.workoutsAdded++;
+  });
+  const workouts = [...curW, ...addedW].sort((a, b) =>
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    String(b.id).localeCompare(String(a.id), undefined, { numeric: true }));
+
+  const curC = arr(current.customExercises);
+  const cIds = new Set(curC.map(e => e.id));
+  const addedC = arr(incoming.customExercises).filter(e => e && !cIds.has(e.id));
+  stats.customAdded = addedC.length;
+
+  const curR = arr(current.myRoutines);
+  const rIds = new Set(curR.map(r => r.id));
+  const myRoutines = [...curR];
+  arr(incoming.myRoutines).forEach(r => {
+    if (!r || rIds.has(r.id)) return;
+    if (myRoutines.length >= 3) { stats.routinesSkipped++; return; }
+    rIds.add(r.id); myRoutines.push(r); stats.routinesAdded++;
+  });
+
+  const curF = arr(current.favorites);
+  const favorites = [...new Set([...curF, ...arr(incoming.favorites)])];
+  stats.favoritesAdded = favorites.length - curF.length;
+
+  return { merged: { workouts, customExercises: [...curC, ...addedC], myRoutines, favorites }, stats };
+}
+
+/* ---------- backup modal ---------- */
 function BackupModal({ exportData, onImport, onClose }) {
   const fileInputRef = useRef(null);
   const [status, setStatus] = useState(null); // null | 'success' | 'error'
+  const [pending, setPending] = useState(null); // { data, stats }
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [resultMsg, setResultMsg] = useState('');
 
   const handleExport = () => {
-    const json = JSON.stringify(exportData, null, 2);
+    const json = JSON.stringify({ ...exportData, app:'yurutore', exportedAt:new Date().toISOString() }, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1523,9 +1572,13 @@ function BackupModal({ exportData, onImport, onClose }) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        onImport(data);
-        setStatus('success');
+        if (!data || typeof data !== 'object' || !Array.isArray(data.workouts)) throw new Error('invalid');
+        const { stats } = mergeBackup(exportData, data);
+        setPending({ data, stats });
+        setConfirmReplace(false);
+        setStatus(null);
       } catch (err) {
+        setPending(null);
         setStatus('error');
       }
     };
@@ -1533,25 +1586,62 @@ function BackupModal({ exportData, onImport, onClose }) {
     e.target.value = '';
   };
 
+  const doMerge = () => {
+    onImport(pending.data, 'merge');
+    setResultMsg(`統合しました！ 記録を${pending.stats.workoutsAdded}件追加しました。`);
+    setPending(null); setStatus('success');
+  };
+  const doReplace = () => {
+    if (!confirmReplace) { setConfirmReplace(true); return; }
+    onImport(pending.data, 'replace');
+    setResultMsg('この端末のデータを置き換えました。');
+    setPending(null); setStatus('success');
+  };
+
+  const st = pending?.stats;
   return (
     <div className="fixed inset-0 z-50 bg-slate-800/40 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 soft-shadow">
+      <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 soft-shadow max-h-[85vh] overflow-y-auto">
         <div className="flex justify-between items-center">
-          <h4 className="text-sm font-black text-slate-800">データのバックアップ</h4>
+          <h4 className="text-sm font-black text-slate-800">データのバックアップ・統合</h4>
           <button onClick={onClose} className="text-slate-400"><i className="fas fa-times"></i></button>
         </div>
-        <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
-          機種変更などでデータを引き継ぎたいときは、まずこの端末で「書き出す」を押してファイルを保存し、新しい端末でこのアプリを開いてから「読み込む」でそのファイルを選んでください。
-        </p>
-        <button onClick={handleExport} className="w-full py-3 bg-forest-600 hover:bg-forest-700 text-white font-black text-sm rounded-2xl">
-          <i className="fas fa-download mr-2"></i>バックアップを書き出す
-        </button>
-        <button onClick={()=>fileInputRef.current?.click()} className="w-full py-3 bg-white border-2 border-forest-200 text-forest-600 font-black text-sm rounded-2xl">
-          <i className="fas fa-upload mr-2"></i>バックアップを読み込む
-        </button>
-        <input ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={handleFileChange} />
-        {status==='success' && <p className="text-xs font-bold text-forest-600 text-center">読み込みが完了しました！</p>}
-        {status==='error' && <p className="text-xs font-bold text-coral-600 text-center">読み込めませんでした。正しいバックアップファイルか確認してください。</p>}
+        {!pending && (
+          <React.Fragment>
+            <p className="text-[11px] text-slate-400 font-bold leading-relaxed">
+              別の端末の記録をこの端末にまとめたいときは、もう一方の端末で「書き出す」を押してファイルを保存し、こちらで「読み込んで統合する」からそのファイルを選んでください。今ある記録は消えず、足りない記録だけが追加されます（同じ記録は自動でスキップ）。
+            </p>
+            <button onClick={handleExport} className="w-full py-3 bg-forest-600 hover:bg-forest-700 text-white font-black text-sm rounded-2xl">
+              <i className="fas fa-download mr-2"></i>バックアップを書き出す
+            </button>
+            <button onClick={()=>fileInputRef.current?.click()} className="w-full py-3 bg-white border-2 border-forest-200 text-forest-600 font-black text-sm rounded-2xl">
+              <i className="fas fa-code-merge mr-2"></i>読み込んで統合する
+            </button>
+          </React.Fragment>
+        )}
+        <input ref={fileInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleFileChange} />
+        {pending && (
+          <div className="space-y-3">
+            <div className="bg-forest-50 rounded-2xl p-3 text-xs font-bold text-slate-600 space-y-1 leading-relaxed">
+              <p className="text-forest-700 font-black">このファイルを統合すると…</p>
+              <p><i className="fas fa-circle-plus text-forest-500 mr-1"></i>新しく追加される記録：{st.workoutsAdded}件</p>
+              <p><i className="fas fa-equals text-slate-400 mr-1"></i>すでにあるのでスキップ：{st.workoutsSkipped}件</p>
+              {st.customAdded>0 && <p><i className="fas fa-star text-forest-500 mr-1"></i>追加される自分の種目：{st.customAdded}件</p>}
+              {st.routinesAdded>0 && <p><i className="fas fa-list-check text-forest-500 mr-1"></i>追加されるマイメニュー：{st.routinesAdded}件</p>}
+              {st.routinesSkipped>0 && <p className="text-coral-600">マイメニューは3つまでなので、{st.routinesSkipped}件は追加されません</p>}
+              {st.favoritesAdded>0 && <p><i className="fas fa-heart text-forest-500 mr-1"></i>追加されるお気に入り：{st.favoritesAdded}件</p>}
+            </div>
+            <button onClick={doMerge} className="w-full py-3 bg-forest-600 hover:bg-forest-700 text-white font-black text-sm rounded-2xl">
+              <i className="fas fa-code-merge mr-2"></i>統合する（おすすめ）
+            </button>
+            <button onClick={doReplace} className={`w-full py-2.5 border-2 font-black text-xs rounded-2xl ${confirmReplace ? 'bg-coral-500 border-coral-500 text-white' : 'bg-white border-slate-200 text-slate-500'}`}>
+              {confirmReplace ? '本当に置き換える（この端末の記録は消えます）' : 'この端末のデータを置き換える'}
+            </button>
+            <button onClick={()=>{ setPending(null); setConfirmReplace(false); }} className="w-full py-2 text-xs font-bold text-slate-400">キャンセル</button>
+          </div>
+        )}
+        {status==='success' && <p className="text-xs font-bold text-forest-600 text-center">{resultMsg}</p>}
+        {status==='error' && <p className="text-xs font-bold text-coral-600 text-center">読み込めませんでした。ゆるトレ日記のバックアップファイル（.json）か確認してください。</p>}
       </div>
     </div>
   );
@@ -2019,14 +2109,24 @@ function App() {
   const deleteMyRoutine = (id) => setMyRoutines(prev => prev.filter(r=>r.id!==id));
   const toggleFavorite = (id) => setFavorites(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
   const backupData = { workouts, level, focusMode, customExercises, myRoutines, favorites, profile };
-  const handleImportBackup = (data) => {
-    if (Array.isArray(data.workouts)) setWorkouts(data.workouts);
-    if (data.level) setLevel(data.level);
-    if (typeof data.focusMode === 'boolean') setFocusMode(data.focusMode);
-    if (Array.isArray(data.customExercises)) setCustomExercises(data.customExercises);
-    if (Array.isArray(data.myRoutines)) setMyRoutines(data.myRoutines);
-    if (Array.isArray(data.favorites)) setFavorites(data.favorites);
-    if (data.profile) setProfile(data.profile);
+  const handleImportBackup = (data, mode='merge') => {
+    if (mode==='replace') {
+      if (Array.isArray(data.workouts)) setWorkouts(data.workouts);
+      if (data.level) setLevel(data.level);
+      if (typeof data.focusMode === 'boolean') setFocusMode(data.focusMode);
+      if (Array.isArray(data.customExercises)) setCustomExercises(data.customExercises);
+      if (Array.isArray(data.myRoutines)) setMyRoutines(data.myRoutines);
+      if (Array.isArray(data.favorites)) setFavorites(data.favorites);
+      if (data.profile) setProfile(data.profile);
+      return;
+    }
+    // 統合: この端末の記録に、足りないものだけ追加する
+    const { merged } = mergeBackup(backupData, data);
+    setWorkouts(merged.workouts);
+    setCustomExercises(merged.customExercises);
+    setMyRoutines(merged.myRoutines);
+    setFavorites(merged.favorites);
+    if (!profile && data.profile) setProfile(data.profile);
   };
 
   if (!loaded) {
